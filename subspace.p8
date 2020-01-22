@@ -58,7 +58,7 @@ function gen_enemy()
     printh("enemy spawned: "..x..", "..y)
     return {kind="follower",hp=100,maxhp=100,x=x,y=y,dx=0,dy=0,acc=acc,live=true}
 end
-for i=1,5 do
+for i=1,128 do
     add(enemies, gen_enemy())
 end
 
@@ -161,7 +161,7 @@ function vec_limit_magnitude(dx, dy, maxspeed)
 end
 
 function _update60()
-    -- handle user input
+    -- handle user input: turn
     if (btn(0)) then
         p.deg += dt*p.turnspeed
     elseif (btn(1)) then
@@ -243,7 +243,7 @@ function update_bombs()
                     -- test collision: enemy
                     -- TODO: just do pos+radius check per enemy.
                     for _,e in pairs(enemies) do
-                        if b.x>=e.x-4 and b.x<=e.x+4 and b.y>=e.y-4 and b.y<=e.y+4 then
+                        if e.live and b.x>=e.x-4 and b.x<=e.x+4 and b.y>=e.y-4 and b.y<=e.y+4 then
                             detonate_bomb(b)
                             goto nextbomb
                         end
