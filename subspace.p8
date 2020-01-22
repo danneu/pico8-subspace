@@ -50,16 +50,32 @@ local SOUNDS = {
 
 -- TODO: Make enemy pool and actually spawn enemies
 local enemies = {}
-function gen_enemy()
+local enemy_idx=#enemies -- so that first usage is idx=1
+for i=1,128 do
     local x=rnd(mapsize)
     local y=rnd(mapsize)
     local acc=rnd(1)+0.5
     -- TODO: random maxspeed or scale speed difficulty progression
-    printh("enemy spawned: "..x..", "..y)
-    return {kind="follower",hp=100,maxhp=100,x=x,y=y,dx=0,dy=0,acc=acc,live=true}
+    local e = {
+        kind="follower",
+        hp=100,
+        maxhp=100,
+        x=x,y=y,
+        dx=0,dy=0,
+        acc=acc,
+        live=false
+    }
+    add(enemies, e)
 end
-for i=1,128 do
-    add(enemies, gen_enemy())
+function get_pooled_enemy()
+    enemy_idx = (enemy_idx+#enemies) % #enemies + 1
+    local e = enemies[enemy_idx]
+    e.live = false
+    return e
+end
+-- spawn a few enemies off the bat just for demo
+for i=1,5 do
+    enemies[i].live = true
 end
 
 function vec_subtract(x2, y2, x1, y1)
