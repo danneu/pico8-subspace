@@ -15,7 +15,10 @@ local p = {
     -- more power = easier to overcome inertia
     thrustpower=1.0
 }
-local MAXINT=32767
+local MAXNUM=32767.99999
+
+-- map is a square. mapsize is pixel count of a side.
+local mapsize=128*2
 
 local bombs = {}
 local bomb_idx=#bombs -- so that first usage is idx=1
@@ -46,13 +49,18 @@ local SOUNDS = {
 }
 
 -- TODO: Make enemy pool and actually spawn enemies
-local enemies = {
-    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
-    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
-    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
-    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
-    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
-}
+local enemies = {}
+function gen_enemy()
+    local x=rnd(mapsize)
+    local y=rnd(mapsize)
+    local acc=rnd(1)+0.5
+    -- TODO: random maxspeed or scale speed difficulty progression
+    printh("enemy spawned: "..x..", "..y)
+    return {kind="follower",hp=100,maxhp=100,x=x,y=y,dx=0,dy=0,acc=acc,live=true}
+end
+for i=1,5 do
+    add(enemies, gen_enemy())
+end
 
 function vec_subtract(x2, y2, x1, y1)
     return x2-x1, y2-y1
@@ -120,13 +128,22 @@ function _init()
     cls()
 end
 
+-- tweaked length calculation to avoid
+-- 16.16 fixed pt overflow.
+-- works with x,y up to +/-8191
+-- and distance up to 11584 by
+-- sacrificing some precision
 function vec_length(x, y)
-    -- beware pico8 maxint overflow
-    -- i should probably just check for negative vec_length
-    -- but this dumb hack works for now but just bets
-    -- that veclength result won't be incremented downstream.
-    local len = sqrt(x*x+y*y)
-    return len >= 0 and len or MAXINT
+    -- scale down by 6 bits
+    local x = x/64
+    local y = y/64
+
+    local sq = x*x+y*y
+    -- handle overflow
+    if (sq<0) return MAXNUM
+
+    -- scale back up by 6 bits
+    return sqrt(sq)*64
 end
 
 function vec_normalize(x, y)
@@ -270,13 +287,14 @@ end
 
 function draw_debug()
     local len = vec_length(p.dx, p.dy)
-    print("vel: "..len, 1, 1)
-    print("pos: ("..p.x..", "..p.y..")", 1, 8)
+    local offsetx = p.x-viewport.w/2
+    local offsety = p.y-viewport.h/2
+    print("vel: "..len, 1+offsetx, 1+offsety)
+    print("pos: ("..p.x..", "..p.y..")", 1+offsetx, 8+offsety)
 end
 
--- map is 4 screens by 4 screens big, so 512x512
+-- map is 2 screens by 2 screens big, so 256x256
 function draw_minimap()
-    local mapsize=512
     local minisize=16
     local minix = p.x-viewport.w/2
     local miniy = p.y+viewport.h/2-minisize-1
