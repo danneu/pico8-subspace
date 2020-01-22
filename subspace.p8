@@ -15,6 +15,29 @@ local p = {
     -- more power = easier to overcome inertia
     thrustpower=1.0
 }
+local MAXINT=32767
+
+local bombs = {}
+local bomb_idx=#bombs -- so that first usage is idx=1
+for i=1,128 do
+    bombs[i] = {
+        live=false,
+        friendly=false,
+        x=0,y=0,dx=0,dy=0,
+        dmg=0,
+        -- splash radius: the number of pixels away from
+        -- detonation that bomb can affect.
+        splashr=16,
+        -- how fast splash dmg decays if it's not a direct hit
+        decay=1
+    }
+end
+function get_pooled_bomb()
+    bomb_idx = (bomb_idx+#bombs) % #bombs + 1
+    local bomb = bombs[bomb_idx]
+    bomb.live = false
+    return bomb
+end
 
 local viewport = {w=128,h=128}
 
@@ -22,15 +45,74 @@ local SOUNDS = {
     wallbump=0,
 }
 
-function draw_player(p)
-    circ(p.x, p.y, p.r, 5)
+-- TODO: Make enemy pool and actually spawn enemies
+local enemies = {
+    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
+    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
+    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
+    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
+    {kind="follower",hp=100,maxhp=100,x=48,y=48,dx=0,dy=0,acc=rnd(1)+0.5,live=true},
+}
 
-    function calcNose(p)
-        local x2 = p.x + p.r * cos(p.deg/360)
-        local y2 = p.y + p.r * sin(p.deg/360)
-        return x2, y2
+function vec_subtract(x2, y2, x1, y1)
+    return x2-x1, y2-y1
+end
+
+function update_enemies()
+    for _,e in pairs(enemies) do
+        if e.live then
+            if e.kind == 'follower' then
+                local maxspeed = 32
+                -- local acc =0.75
+                local vecx, vecy = vec_normalize(vec_subtract(p.x,p.y,e.x,e.y))
+                e.dx += vecx*e.acc
+                e.dy += vecy*e.acc
+                e.dx, e.dy = vec_limit_magnitude(e.dx, e.dy, maxspeed)
+            end
+            e.x += dt*e.dx
+            e.y += dt*e.dy
+        end
     end
-    local x2, y2 = calcNose(p)
+end
+
+function draw_enemies()
+    for _,e in pairs(enemies) do
+        if e.live then
+            if e.kind == 'follower' then
+                local flipx = e.x<p.x
+                spr(1,e.x-4,e.y-4,1,1,flipx)
+                -- draw health bar (only when damaged)
+                if true or e.hp<e.maxhp then
+                    local hppixels = ceil(e.hp*8/e.maxhp)
+                    for i=0,hppixels do
+                        pset(e.x+i-4,e.y+8,11)
+                    end
+                end
+            end
+        end
+    end
+end
+
+function draw_bombs()
+    for _,e in pairs(bombs) do
+        if e.live then
+            local color = e.friendly and 12 or 8
+            circfill(e.x, e.y, 1, color)
+        end
+    end
+end
+
+-- calculates the position of the player ship's nose.
+-- i.e. where bombs shoot from.
+function calcNose()
+    local x2 = p.x + p.r * cos(p.deg/360)
+    local y2 = p.y + p.r * sin(p.deg/360)
+    return x2, y2
+end
+
+function draw_player()
+    circ(p.x, p.y, p.r, 5)
+    local x2, y2 = calcNose()
     line(p.x, p.y, x2, y2, 7)
 end
 
@@ -39,12 +121,26 @@ function _init()
 end
 
 function vec_length(x, y)
-    return sqrt(x*x+y*y)
+    -- beware pico8 maxint overflow
+    -- i should probably just check for negative vec_length
+    -- but this dumb hack works for now but just bets
+    -- that veclength result won't be incremented downstream.
+    local len = sqrt(x*x+y*y)
+    return len >= 0 and len or MAXINT
 end
 
 function vec_normalize(x, y)
     local len = vec_length(x, y)
     return x/len, y/len
+end
+
+function vec_limit_magnitude(dx, dy, maxspeed)
+    local len = vec_length(dx, dy)
+    if (len > maxspeed) then
+        dx *= maxspeed/len
+        dy *= maxspeed/len
+    end
+    return dx, dy
 end
 
 function _update60()
@@ -55,6 +151,7 @@ function _update60()
         p.deg -= dt*p.turnspeed
     end
 
+    -- handle user input: thrust
     if (btn(2)) then
         p.thrusting=true
         p.dx += p.thrustpower * cos(p.deg/360)
@@ -65,6 +162,20 @@ function _update60()
         p.dy -= p.thrustpower * sin(p.deg/360)
     else
         p.thrusting=false
+    end
+
+    -- handle user input: shoot bomb
+    if btnp(5) then
+        local x, y = calcNose()
+        speed = 64
+        local bomb = get_pooled_bomb()
+        bomb.live=true
+        bomb.friendly=true
+        bomb.x=x
+        bomb.y=y
+        bomb.dx=speed*cos(p.deg/360) + p.dx
+        bomb.dy=speed*sin(p.deg/360) + p.dy
+        bomb.dmg=50
     end
 
     -- enforce player max speed
@@ -86,6 +197,75 @@ function _update60()
 
     -- update camera
     camera(p.x-viewport.w/2, p.y-viewport.h/2)
+
+    update_enemies()
+    update_bombs()
+end
+
+function update_bombs()
+    local dirs = {
+        {x=-1,y=0},
+        {x=1,y=0},
+        {x=0,y=-1},
+        {x=0,y=1}
+    }
+    -- FIXME: this is pretty silly
+    for _,b in pairs(bombs) do
+        ::nextbomb::
+        if b.live then
+            b.x += dt*b.dx
+            b.y += dt*b.dy
+            for _,dir in pairs(dirs) do
+                local x = b.x+dir.x
+                local y = b.y+dir.y
+                -- test collision: wall
+                if fget(mget(flr8(x), flr8(y)), 0) then
+                    detonate_bomb(b)
+                    goto nextbomb
+                else
+                    -- test collision: enemy
+                    -- TODO: just do pos+radius check per enemy.
+                    for _,e in pairs(enemies) do
+                        if b.x>=e.x-4 and b.x<=e.x+4 and b.y>=e.y-4 and b.y<=e.y+4 then
+                            detonate_bomb(b)
+                            goto nextbomb
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function vec_distance(x1,y1,x2,y2)
+    return vec_length(x2-x1, y2-y1)
+end
+
+-- bombs explode at a point and do splash damage.
+-- this fn applies dmg to nearby enemies and
+-- releases bomb back to the pool.
+-- this fn also mutates enemies and possibly returns
+-- them to enemy pool.
+function detonate_bomb(b)
+    local E=2.718
+    printh("detonated")
+    b.live=false
+    -- find all enemies within splashr
+    for _,e in pairs(enemies) do
+        if e.live then
+            local dist = vec_distance(e.x,e.y,b.x,b.y)
+            printh('dist'..dist)
+            if dist<=b.splashr then
+                -- calculate dmg based on splash radius and splash decay
+                local dmg = b.dmg * (E^(-dist/b.splashr*b.decay))
+                printh('dmg:'..dmg)
+                e.hp-=dmg
+                if e.hp <= 0 then
+                    e.live=false
+                end
+            end
+        end
+    end
 end
 
 function draw_debug()
@@ -94,11 +274,32 @@ function draw_debug()
     print("pos: ("..p.x..", "..p.y..")", 1, 8)
 end
 
+-- map is 4 screens by 4 screens big, so 512x512
+function draw_minimap()
+    local mapsize=512
+    local minisize=16
+    local minix = p.x-viewport.w/2
+    local miniy = p.y+viewport.h/2-minisize-1
+    rectfill(minix, miniy, minix+minisize-1, miniy+minisize-1,0)
+    rect(minix, miniy, minix+minisize-1, miniy+minisize-1,5)
+    -- draw enemies
+    for _,e in pairs(enemies) do
+        if e.live then
+            pset(minix+flr(e.x/minisize), miniy+flr(e.y/minisize), 8)
+        end
+    end
+    -- draw player
+    pset(minix+flr(p.x/minisize), miniy+flr(p.y/minisize), 7)
+end
+
 function _draw()
     cls()
     map(0,0)
     draw_debug()
-    draw_player(p)
+    draw_player()
+    draw_enemies()
+    draw_bombs()
+    draw_minimap()
 end
 
 -- convert a position from game space (pixels)
@@ -107,7 +308,9 @@ function flr8(v)
     return flr(v/8)
 end
 
--- e is table of x,y,dx,dy,r
+-- FIXME: this collision detection is playable but pretty janky.
+--
+-- e is the player entity for now.
 -- returns {collided=bool}
 function collide_map(e, flag)
     local collided = false
@@ -219,8 +422,8 @@ __gfx__
 00000000000000000550055500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000007777700599959000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000777777709aaaa9000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000007070777a55a55a900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-0000000007707777aaa5aaa900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000007575777a55a55a900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000007757777aaa5aaa900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000007777700aaaaa9000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000007070000a0a0a9000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000a0a0a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
